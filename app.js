@@ -5,8 +5,6 @@
 // Pon aquí la ruta de tu CSV.
 // Si lo tienes en la raíz del repo con este nombre:
 const CSV_URL = "inventario.csv";
-// Si en tu repo actual se llama distinto (por ejemplo "Dias de Inventario.csv"
-// o usas una URL RAW), cambia SOLO esta línea y deja todo lo demás igual.
 
 // Máximo de filas que se pintan en la tabla cuando el límite está activo
 const MAX_ROWS_RENDER = 1000;
@@ -22,7 +20,6 @@ let sortConfig = {
 
 const state = {
   search: "",
-  clasifActivas: new Set(), // ej: { "A", "B" }
   filtroCobertura: "all", // all | critico | medio | alto
   onlyCriticalDays: false, // Cobertura Días (30) <= 30
   onlyNoMovement: false, // Promedio Vta Mes = 0
@@ -46,6 +43,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const limitRowsToggle = document.getElementById("limitRowsToggle");
   const exportCsvButton = document.getElementById("exportCsvButton");
   const headerCells = document.querySelectorAll("#dataTable thead th");
+
+  // Guardar etiqueta original de cada encabezado (para mostrar ▲▼)
+  headerCells.forEach((th) => {
+    th.dataset.label = th.textContent.trim();
+  });
 
   // Subir CSV manual (opcional)
   if (fileInput) {
@@ -97,7 +99,6 @@ document.addEventListener("DOMContentLoaded", () => {
     clearFiltersBtn.addEventListener("click", () => {
       if (searchInput) searchInput.value = "";
       state.search = "";
-      state.clasifActivas.clear();
       state.filtroCobertura = "all";
       state.onlyCriticalDays = false;
       state.onlyNoMovement = false;
@@ -106,7 +107,6 @@ document.addEventListener("DOMContentLoaded", () => {
       if (onlyCriticalDays) onlyCriticalDays.checked = false;
       if (onlyNoMovement) onlyNoMovement.checked = false;
 
-      sincronizarChipsUI();
       aplicarFiltrosYRender();
     });
   }
@@ -119,7 +119,7 @@ document.addEventListener("DOMContentLoaded", () => {
     th.addEventListener("click", () => {
       const key = th.getAttribute("data-key");
       if (!key) return;
-      sortByColumn(key, th.classList.contains("is-numeric"));
+      sortByColumn(key, th.classList.contains("is-numeric"), th);
     });
   });
 });
@@ -160,7 +160,6 @@ async function cargarCSVDesdeRepositorio() {
       statusEl.textContent = `CSV cargado automáticamente (${rawData.length} filas).`;
     }
 
-    construirChipsClasificacion(rawData);
     aplicarFiltrosYRender(true);
   } catch (err) {
     console.error("Error al cargar CSV desde el repositorio:", err);
@@ -191,7 +190,6 @@ function handleFileUpload(ev) {
       statusEl.textContent = `Archivo cargado manualmente (${rawData.length} filas).`;
     }
 
-    construirChipsClasificacion(rawData);
     aplicarFiltrosYRender(true);
   };
 
@@ -275,7 +273,6 @@ function aplicarFiltrosYRender(resetSort = false) {
   if (!rawData.length) {
     renderTable([]);
     renderKPIs([]);
-    renderResumenClasif([]);
     return;
   }
 
@@ -285,11 +282,6 @@ function aplicarFiltrosYRender(resetSort = false) {
   if (state.search) {
     const term = state.search;
     data = data.filter((row) => row._search && row._search.includes(term));
-  }
-
-  // Filtro por clasificación (chips)
-  if (state.clasifActivas.size > 0) {
-    data = data.filter((row) => state.clasifActivas.has(row.clasificacion));
   }
 
   // Filtro por cobertura (Mes)
@@ -325,7 +317,6 @@ function aplicarFiltrosYRender(resetSort = false) {
   }
 
   renderKPIs(data);
-  renderResumenClasif(data);
   renderTable(data);
 }
 
@@ -333,7 +324,7 @@ function aplicarFiltrosYRender(resetSort = false) {
 // ORDENAR TABLA
 // =========================
 
-function sortByColumn(key, isNumericOverride) {
+function sortByColumn(key, isNumericOverride, clickedTh) {
   if (!key) return;
 
   if (sortConfig.key === key) {
@@ -344,6 +335,20 @@ function sortByColumn(key, isNumericOverride) {
   }
 
   const data = sortData([...filteredData], key, isNumericOverride);
+
+  // Actualizar flechitas en encabezados
+  const headerCells = document.querySelectorAll("#dataTable thead th");
+  headerCells.forEach((th) => {
+    const baseLabel = th.dataset.label || th.textContent.trim();
+    th.textContent = baseLabel;
+  });
+
+  if (clickedTh) {
+    const baseLabel = clickedTh.dataset.label || clickedTh.textContent.trim();
+    const arrow = sortConfig.direction === "asc" ? " ▲" : " ▼";
+    clickedTh.textContent = baseLabel + arrow;
+  }
+
   renderTable(data);
 }
 
@@ -377,7 +382,7 @@ function renderKPIs(data) {
   const kpiPromedioVenta = document.getElementById("kpiPromedioVenta");
   const kpiCobertura = document.getElementById("kpiCobertura");
   const kpiCriticos30 = document.getElementById("kpiCriticos30");
-  const kpiSinMovimiento = document.getElementById("kpiSinMovimiento");
+  const kpiMayor3Meses = document.getElementById("kpiMayor3Meses");
   const kpiPctCriticos = document.getElementById("kpiPctCriticos");
 
   if (!data.length) {
@@ -386,7 +391,7 @@ function renderKPIs(data) {
     if (kpiPromedioVenta) kpiPromedioVenta.textContent = "0";
     if (kpiCobertura) kpiCobertura.textContent = "0";
     if (kpiCriticos30) kpiCriticos30.textContent = "0";
-    if (kpiSinMovimiento) kpiSinMovimiento.textContent = "0";
+    if (kpiMayor3Meses) kpiMayor3Meses.textContent = "0";
     if (kpiPctCriticos) kpiPctCriticos.textContent = "0%";
     return;
   }
@@ -404,8 +409,9 @@ function renderKPIs(data) {
     (r) => (r.cobertura_dias_30 || 0) <= 30
   ).length;
 
-  const productosSinMovimiento = data.filter(
-    (r) => (r.promedio_vta_mes || 0) === 0
+  // SKUs con inventario > 3 meses (cobertura_mes > 3)
+  const skusMayor3Meses = data.filter(
+    (r) => (r.cobertura_mes || 0) > 3
   ).length;
 
   const invCriticos30 = data.reduce((acc, r) => {
@@ -449,11 +455,10 @@ function renderKPIs(data) {
       });
   }
 
-  if (kpiSinMovimiento) {
-    kpiSinMovimiento.textContent =
-      productosSinMovimiento.toLocaleString(undefined, {
-        maximumFractionDigits: 0,
-      });
+  if (kpiMayor3Meses) {
+    kpiMayor3Meses.textContent = skusMayor3Meses.toLocaleString(undefined, {
+      maximumFractionDigits: 0,
+    });
   }
 
   if (kpiPctCriticos) {
@@ -461,46 +466,6 @@ function renderKPIs(data) {
       maximumFractionDigits: 1,
     })}%`;
   }
-}
-
-// =========================
-// RESUMEN CLASIFICACIÓN
-// =========================
-
-function renderResumenClasif(data) {
-  const container = document.getElementById("clasifSummary");
-  if (!container) return;
-
-  container.innerHTML = "";
-  if (!data.length) return;
-
-  const map = {};
-  data.forEach((r) => {
-    const c = r.clasificacion || "Sin";
-    if (!map[c]) map[c] = { count: 0, inv: 0 };
-    map[c].count += 1;
-    map[c].inv += r.inv || 0;
-  });
-
-  Object.entries(map).forEach(([clasif, info]) => {
-    const pill = document.createElement("div");
-    pill.className = "summary-pill";
-
-    const dot = document.createElement("span");
-    dot.className = `summary-dot ${clasif}`;
-    pill.appendChild(dot);
-
-    const label = document.createElement("span");
-    label.textContent = `Clasif ${clasif}`;
-    pill.appendChild(label);
-
-    const detail = document.createElement("span");
-    detail.style.color = "var(--text-muted)";
-    detail.textContent = `· ${info.count.toLocaleString()} prod · Inv ${info.inv.toLocaleString()}`;
-    pill.appendChild(detail);
-
-    container.appendChild(pill);
-  });
 }
 
 // =========================
@@ -593,70 +558,6 @@ function formatNumber(n, decimals = 0) {
   return n.toLocaleString(undefined, {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
-  });
-}
-
-// =========================
-// CHIPS DE CLASIFICACIÓN
-// =========================
-
-function construirChipsClasificacion(data) {
-  const container = document.getElementById("clasifChips");
-  if (!container) return;
-
-  container.innerHTML = "";
-
-  const clasifs = Array.from(
-    new Set(
-      data
-        .map((r) => r.clasificacion)
-        .filter((v) => v !== undefined && v !== null && v !== "")
-    )
-  ).sort();
-
-  clasifs.forEach((c) => {
-    const chip = document.createElement("div");
-    chip.className = `chip ${c}`;
-    chip.dataset.value = c;
-    chip.innerHTML = `<strong>${c}</strong><span>0</span>`;
-    chip.addEventListener("click", () => toggleClasifChip(c));
-    container.appendChild(chip);
-  });
-
-  actualizarContadoresChips();
-}
-
-function toggleClasifChip(value) {
-  if (state.clasifActivas.has(value)) state.clasifActivas.delete(value);
-  else state.clasifActivas.add(value);
-
-  sincronizarChipsUI();
-  aplicarFiltrosYRender();
-}
-
-function sincronizarChipsUI() {
-  const chips = document.querySelectorAll("#clasifChips .chip");
-  chips.forEach((chip) => {
-    const value = chip.dataset.value;
-    if (state.clasifActivas.has(value)) chip.classList.add("active");
-    else chip.classList.remove("active");
-  });
-  actualizarContadoresChips();
-}
-
-function actualizarContadoresChips() {
-  const conteos = {};
-  rawData.forEach((r) => {
-    const c = r.clasificacion || "";
-    if (!c) return;
-    conteos[c] = (conteos[c] || 0) + 1;
-  });
-
-  const chips = document.querySelectorAll("#clasifChips .chip");
-  chips.forEach((chip) => {
-    const value = chip.dataset.value;
-    const span = chip.querySelector("span");
-    span.textContent = (conteos[value] || 0).toLocaleString();
   });
 }
 
