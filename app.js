@@ -2,13 +2,18 @@
 // CONFIGURACIÓN
 // =========================
 
-// CSV en la MISMA carpeta que index.html, app.js y styles.css
-// Nombre del archivo en el repo: inventario.csv
+// Pon aquí la ruta de tu CSV.
+// Si lo tienes en la raíz del repo con este nombre:
 const CSV_URL = "inventario.csv";
+// Si en tu repo actual se llama distinto (por ejemplo "Dias de Inventario.csv"
+// o usas una URL RAW), cambia SOLO esta línea y deja todo lo demás igual.
+
+// Máximo de filas que se pintan en la tabla cuando el límite está activo
+const MAX_ROWS_RENDER = 1000;
 
 // Datos en memoria
-let rawData = [];      // todos los registros
-let filteredData = []; // registros filtrados
+let rawData = []; // todos los registros
+let filteredData = []; // registros filtrados (último resultado de filtros)
 
 let sortConfig = {
   key: null,
@@ -17,8 +22,11 @@ let sortConfig = {
 
 const state = {
   search: "",
-  clasifActivas: new Set(),   // ej: { "A", "B" }
-  filtroCobertura: "all",     // all | critico | medio | alto
+  clasifActivas: new Set(), // ej: { "A", "B" }
+  filtroCobertura: "all", // all | critico | medio | alto
+  onlyCriticalDays: false, // Cobertura Días (30) <= 30
+  onlyNoMovement: false, // Promedio Vta Mes = 0
+  limitRows: true, // limitar filas pintadas
 };
 
 // =========================
@@ -26,25 +34,33 @@ const state = {
 // =========================
 
 document.addEventListener("DOMContentLoaded", () => {
-  // 1) Cargar CSV automáticamente al abrir la página
+  // Cargar CSV automáticamente
   cargarCSVDesdeRepositorio();
 
-  // 2) Listeners de UI
-  const fileInput       = document.getElementById("fileInput");
-  const searchInput     = document.getElementById("searchInput");
+  const fileInput = document.getElementById("fileInput");
+  const searchInput = document.getElementById("searchInput");
   const coberturaSelect = document.getElementById("coberturaSelect");
   const clearFiltersBtn = document.getElementById("clearFiltersBtn");
-  const headerCells     = document.querySelectorAll("#dataTable thead th");
+  const onlyCriticalDays = document.getElementById("onlyCriticalDays");
+  const onlyNoMovement = document.getElementById("onlyNoMovement");
+  const limitRowsToggle = document.getElementById("limitRowsToggle");
+  const exportCsvButton = document.getElementById("exportCsvButton");
+  const headerCells = document.querySelectorAll("#dataTable thead th");
 
-  // Opción extra: permitir subir otro CSV manualmente (sobrescribe datos)
+  // Subir CSV manual (opcional)
   if (fileInput) {
     fileInput.addEventListener("change", handleFileUpload);
   }
 
+  // Buscador con debounce para que sea más rápido
   if (searchInput) {
-    searchInput.addEventListener("input", (e) => {
-      state.search = e.target.value.toLowerCase();
+    const debouncedSearch = debounce((value) => {
+      state.search = value.toLowerCase();
       aplicarFiltrosYRender();
+    }, 250);
+
+    searchInput.addEventListener("input", (e) => {
+      debouncedSearch(e.target.value || "");
     });
   }
 
@@ -55,25 +71,70 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  if (onlyCriticalDays) {
+    onlyCriticalDays.addEventListener("change", (e) => {
+      state.onlyCriticalDays = e.target.checked;
+      aplicarFiltrosYRender();
+    });
+  }
+
+  if (onlyNoMovement) {
+    onlyNoMovement.addEventListener("change", (e) => {
+      state.onlyNoMovement = e.target.checked;
+      aplicarFiltrosYRender();
+    });
+  }
+
+  if (limitRowsToggle) {
+    limitRowsToggle.addEventListener("change", (e) => {
+      state.limitRows = e.target.checked;
+      // Solo re-renderizamos tabla, los datos filtrados ya están calculados
+      renderTable(filteredData);
+    });
+  }
+
   if (clearFiltersBtn) {
     clearFiltersBtn.addEventListener("click", () => {
       if (searchInput) searchInput.value = "";
       state.search = "";
       state.clasifActivas.clear();
       state.filtroCobertura = "all";
+      state.onlyCriticalDays = false;
+      state.onlyNoMovement = false;
+
       if (coberturaSelect) coberturaSelect.value = "all";
+      if (onlyCriticalDays) onlyCriticalDays.checked = false;
+      if (onlyNoMovement) onlyNoMovement.checked = false;
+
       sincronizarChipsUI();
       aplicarFiltrosYRender();
     });
   }
 
+  if (exportCsvButton) {
+    exportCsvButton.addEventListener("click", exportFilteredCSV);
+  }
+
   headerCells.forEach((th) => {
     th.addEventListener("click", () => {
       const key = th.getAttribute("data-key");
+      if (!key) return;
       sortByColumn(key, th.classList.contains("is-numeric"));
     });
   });
 });
+
+// =========================
+// DEBOUNCE
+// =========================
+
+function debounce(fn, delay) {
+  let timer = null;
+  return (...args) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delay);
+  };
+}
 
 // =========================
 // CARGA AUTOMÁTICA DESDE EL REPO
@@ -83,18 +144,16 @@ async function cargarCSVDesdeRepositorio() {
   const statusEl = document.getElementById("fileStatus");
 
   try {
-    if (statusEl) statusEl.textContent = "Cargando CSV (inventario.csv)…";
+    if (statusEl) statusEl.textContent = `Cargando CSV (${CSV_URL})…`;
 
-    // Como el CSV está en la misma carpeta, basta la ruta relativa
     const resp = await fetch(CSV_URL);
-
     if (!resp.ok) {
       throw new Error("HTTP " + resp.status + " al leer " + CSV_URL);
     }
 
     const text = await resp.text();
 
-    rawData      = parseCSV(text);
+    rawData = parseCSV(text);
     filteredData = [...rawData];
 
     if (statusEl) {
@@ -103,12 +162,11 @@ async function cargarCSVDesdeRepositorio() {
 
     construirChipsClasificacion(rawData);
     aplicarFiltrosYRender(true);
-
   } catch (err) {
     console.error("Error al cargar CSV desde el repositorio:", err);
     if (statusEl) {
       statusEl.textContent =
-        "Error al cargar el CSV desde GitHub. Verifica que 'inventario.csv' exista en la misma carpeta.";
+        "Error al cargar el CSV desde GitHub. Verifica la ruta en CSV_URL y que el archivo exista.";
     }
   }
 }
@@ -125,7 +183,7 @@ function handleFileUpload(ev) {
   reader.onload = (e) => {
     const text = e.target.result;
 
-    rawData      = parseCSV(text);
+    rawData = parseCSV(text);
     filteredData = [...rawData];
 
     const statusEl = document.getElementById("fileStatus");
@@ -148,14 +206,12 @@ function parseCSV(text) {
   const lines = text.trim().split(/\r?\n/);
   if (lines.length <= 1) return [];
 
-  // Detectar si usa , o ; como separador
   const firstLine = lines[0];
   const delimiter =
     firstLine.split(";").length > firstLine.split(",").length ? ";" : ",";
 
   const headers = firstLine.split(delimiter).map((h) => h.trim().toLowerCase());
 
-  // Buscar índices según tus encabezados reales del CSV
   const idx = {
     codigo: headers.indexOf("codigo"),
     clave: headers.indexOf("clave"),
@@ -173,15 +229,26 @@ function parseCSV(text) {
     const cols = line.split(delimiter);
 
     const record = {
-      codigo:           getCell(cols, idx.codigo),
-      clave:            getCell(cols, idx.clave),
-      desc_prod:        getCell(cols, idx.desc_prod),
-      inv:              parseNumber(getCell(cols, idx.inv)),
-      clasificacion:    getCell(cols, idx.clasificacion),
+      codigo: getCell(cols, idx.codigo),
+      clave: getCell(cols, idx.clave),
+      desc_prod: getCell(cols, idx.desc_prod),
+      inv: parseNumber(getCell(cols, idx.inv)),
+      clasificacion: getCell(cols, idx.clasificacion),
       promedio_vta_mes: parseNumber(getCell(cols, idx.promedio_vta_mes)),
-      cobertura_mes:    parseNumber(getCell(cols, idx.cobertura_mes)),
-      cobertura_dias_30:parseNumber(getCell(cols, idx.cobertura_dias_30)),
+      cobertura_mes: parseNumber(getCell(cols, idx.cobertura_mes)),
+      cobertura_dias_30: parseNumber(getCell(cols, idx.cobertura_dias_30)),
     };
+
+    // Índice de búsqueda (para no recalcular toLowerCase en cada filtro)
+    record._search = (
+      (record.codigo || "") +
+      " " +
+      (record.clave || "") +
+      " " +
+      (record.desc_prod || "")
+    )
+      .toString()
+      .toLowerCase();
 
     acc.push(record);
     return acc;
@@ -214,16 +281,10 @@ function aplicarFiltrosYRender(resetSort = false) {
 
   let data = [...rawData];
 
-  // Búsqueda texto
+  // Búsqueda
   if (state.search) {
     const term = state.search;
-    data = data.filter((row) => {
-      return (
-        String(row.codigo).toLowerCase().includes(term)   ||
-        String(row.clave).toLowerCase().includes(term)    ||
-        String(row.desc_prod).toLowerCase().includes(term)
-      );
-    });
+    data = data.filter((row) => row._search && row._search.includes(term));
   }
 
   // Filtro por clasificación (chips)
@@ -236,10 +297,20 @@ function aplicarFiltrosYRender(resetSort = false) {
     data = data.filter((row) => {
       const c = row.cobertura_mes;
       if (state.filtroCobertura === "critico") return c >= 0 && c <= 1;
-      if (state.filtroCobertura === "medio")   return c > 1 && c <= 3;
-      if (state.filtroCobertura === "alto")    return c > 3;
+      if (state.filtroCobertura === "medio") return c > 1 && c <= 3;
+      if (state.filtroCobertura === "alto") return c > 3;
       return true;
     });
+  }
+
+  // Solo cobertura <= 30 días
+  if (state.onlyCriticalDays) {
+    data = data.filter((row) => (row.cobertura_dias_30 || 0) <= 30);
+  }
+
+  // Solo sin movimiento (Promedio Vta Mes = 0)
+  if (state.onlyNoMovement) {
+    data = data.filter((row) => (row.promedio_vta_mes || 0) === 0);
   }
 
   filteredData = data;
@@ -250,7 +321,7 @@ function aplicarFiltrosYRender(resetSort = false) {
   }
 
   if (sortConfig.key) {
-    data = sortData(data, sortConfig.key);
+    data = sortData([...data], sortConfig.key);
   }
 
   renderKPIs(data);
@@ -262,7 +333,7 @@ function aplicarFiltrosYRender(resetSort = false) {
 // ORDENAR TABLA
 // =========================
 
-function sortByColumn(key, isNumeric) {
+function sortByColumn(key, isNumericOverride) {
   if (!key) return;
 
   if (sortConfig.key === key) {
@@ -272,7 +343,7 @@ function sortByColumn(key, isNumeric) {
     sortConfig.direction = "asc";
   }
 
-  const data = sortData([...filteredData], key, isNumeric);
+  const data = sortData([...filteredData], key, isNumericOverride);
   renderTable(data);
 }
 
@@ -298,30 +369,58 @@ function sortData(data, key, isNumericOverride = false) {
 // =========================
 
 function renderKPIs(data) {
-  const total     = rawData.length;
+  const total = rawData.length;
   const filtrados = data.length;
 
-  const kpiProductos     = document.getElementById("kpiProductos");
-  const kpiInventario    = document.getElementById("kpiInventario");
+  const kpiProductos = document.getElementById("kpiProductos");
+  const kpiInventario = document.getElementById("kpiInventario");
   const kpiPromedioVenta = document.getElementById("kpiPromedioVenta");
-  const kpiCobertura     = document.getElementById("kpiCobertura");
+  const kpiCobertura = document.getElementById("kpiCobertura");
+  const kpiCriticos30 = document.getElementById("kpiCriticos30");
+  const kpiSinMovimiento = document.getElementById("kpiSinMovimiento");
+  const kpiPctCriticos = document.getElementById("kpiPctCriticos");
 
   if (!data.length) {
-    if (kpiProductos)     kpiProductos.textContent     = "0 / " + total;
-    if (kpiInventario)    kpiInventario.textContent    = "0";
+    if (kpiProductos) kpiProductos.textContent = `0 / ${total}`;
+    if (kpiInventario) kpiInventario.textContent = "0";
     if (kpiPromedioVenta) kpiPromedioVenta.textContent = "0";
-    if (kpiCobertura)     kpiCobertura.textContent     = "0";
+    if (kpiCobertura) kpiCobertura.textContent = "0";
+    if (kpiCriticos30) kpiCriticos30.textContent = "0";
+    if (kpiSinMovimiento) kpiSinMovimiento.textContent = "0";
+    if (kpiPctCriticos) kpiPctCriticos.textContent = "0%";
     return;
   }
 
-  const invTotal   = data.reduce((acc, r) => acc + (r.inv || 0), 0);
-  const promVenta  = data.reduce((acc, r) => acc + (r.promedio_vta_mes || 0), 0);
-  const promCobert =
-    data.reduce((acc, r) => acc + (r.cobertura_dias_30 || 0), 0) / data.length;
+  const invTotal = data.reduce((acc, r) => acc + (r.inv || 0), 0);
+  const promVenta = data.reduce(
+    (acc, r) => acc + (r.promedio_vta_mes || 0),
+    0
+  );
+  const promCobertura =
+    data.reduce((acc, r) => acc + (r.cobertura_dias_30 || 0), 0) /
+    data.length;
+
+  const productosCriticos30 = data.filter(
+    (r) => (r.cobertura_dias_30 || 0) <= 30
+  ).length;
+
+  const productosSinMovimiento = data.filter(
+    (r) => (r.promedio_vta_mes || 0) === 0
+  ).length;
+
+  const invCriticos30 = data.reduce((acc, r) => {
+    if ((r.cobertura_dias_30 || 0) <= 30) {
+      return acc + (r.inv || 0);
+    }
+    return acc;
+  }, 0);
+
+  const invTotalData = data.reduce((acc, r) => acc + (r.inv || 0), 0);
+  const pctCriticosInv =
+    invTotalData > 0 ? (invCriticos30 / invTotalData) * 100 : 0;
 
   if (kpiProductos) {
-    kpiProductos.textContent =
-      `${filtrados.toLocaleString()} / ${total.toLocaleString()}`;
+    kpiProductos.textContent = `${filtrados.toLocaleString()} / ${total.toLocaleString()}`;
   }
 
   if (kpiInventario) {
@@ -337,15 +436,35 @@ function renderKPIs(data) {
   }
 
   if (kpiCobertura) {
-    kpiCobertura.textContent = promCobert.toLocaleString(undefined, {
+    kpiCobertura.textContent = promCobertura.toLocaleString(undefined, {
       minimumFractionDigits: 1,
       maximumFractionDigits: 1,
     });
   }
+
+  if (kpiCriticos30) {
+    kpiCriticos30.textContent =
+      productosCriticos30.toLocaleString(undefined, {
+        maximumFractionDigits: 0,
+      });
+  }
+
+  if (kpiSinMovimiento) {
+    kpiSinMovimiento.textContent =
+      productosSinMovimiento.toLocaleString(undefined, {
+        maximumFractionDigits: 0,
+      });
+  }
+
+  if (kpiPctCriticos) {
+    kpiPctCriticos.textContent = `${pctCriticosInv.toLocaleString(undefined, {
+      maximumFractionDigits: 1,
+    })}%`;
+  }
 }
 
 // =========================
-// RESUMEN POR CLASIFICACIÓN
+// RESUMEN CLASIFICACIÓN
 // =========================
 
 function renderResumenClasif(data) {
@@ -360,7 +479,7 @@ function renderResumenClasif(data) {
     const c = r.clasificacion || "Sin";
     if (!map[c]) map[c] = { count: 0, inv: 0 };
     map[c].count += 1;
-    map[c].inv   += r.inv || 0;
+    map[c].inv += r.inv || 0;
   });
 
   Object.entries(map).forEach(([clasif, info]) => {
@@ -377,8 +496,7 @@ function renderResumenClasif(data) {
 
     const detail = document.createElement("span");
     detail.style.color = "var(--text-muted)";
-    detail.textContent =
-      `· ${info.count.toLocaleString()} prod · Inv ${info.inv.toLocaleString()}`;
+    detail.textContent = `· ${info.count.toLocaleString()} prod · Inv ${info.inv.toLocaleString()}`;
     pill.appendChild(detail);
 
     container.appendChild(pill);
@@ -396,71 +514,78 @@ function renderTable(data) {
   tbody.innerHTML = "";
 
   const rowsInfo = document.getElementById("rowsInfo");
-  if (rowsInfo) {
-    rowsInfo.textContent = `${data.length.toLocaleString()} registros`;
+  const totalRows = data.length;
+
+  let rowsToRender = data;
+  if (state.limitRows && data.length > MAX_ROWS_RENDER) {
+    rowsToRender = data.slice(0, MAX_ROWS_RENDER);
   }
 
-  if (!data.length) return;
+  if (rowsInfo) {
+    if (state.limitRows && totalRows > MAX_ROWS_RENDER) {
+      rowsInfo.textContent = `${rowsToRender.length.toLocaleString()} de ${totalRows.toLocaleString()} registros (limitado para mejor rendimiento)`;
+    } else {
+      rowsInfo.textContent = `${totalRows.toLocaleString()} registros`;
+    }
+  }
 
-  data.forEach((row) => {
+  if (!rowsToRender.length) return;
+
+  const fragment = document.createDocumentFragment();
+
+  rowsToRender.forEach((row) => {
     const tr = document.createElement("tr");
 
-    // Código
     const tdCodigo = document.createElement("td");
     tdCodigo.textContent = row.codigo;
     tr.appendChild(tdCodigo);
 
-    // Clave
     const tdClave = document.createElement("td");
     tdClave.textContent = row.clave;
     tr.appendChild(tdClave);
 
-    // Descripción
     const tdDesc = document.createElement("td");
     tdDesc.textContent = row.desc_prod;
     tr.appendChild(tdDesc);
 
-    // Inv
     const tdInv = document.createElement("td");
     tdInv.classList.add("is-numeric");
     tdInv.textContent = formatNumber(row.inv);
     tr.appendChild(tdInv);
 
-    // Clasificación
     const tdClasif = document.createElement("td");
-    const badge    = document.createElement("span");
-    const c        = row.clasificacion || "–";
+    const badge = document.createElement("span");
+    const c = row.clasificacion || "Sin";
     badge.className = `badge-clasif ${c}`;
     badge.textContent = c;
     tdClasif.appendChild(badge);
     tr.appendChild(tdClasif);
 
-    // Promedio Vta Mes
     const tdProm = document.createElement("td");
     tdProm.classList.add("is-numeric");
     tdProm.textContent = formatNumber(row.promedio_vta_mes);
     tr.appendChild(tdProm);
 
-    // Cobertura (Mes)
     const tdCobMes = document.createElement("td");
     tdCobMes.classList.add("is-numeric");
     tdCobMes.textContent = formatNumber(row.cobertura_mes, 1);
     tr.appendChild(tdCobMes);
 
-    // Cobertura Días (30) con heat map
     const tdCobDias = document.createElement("td");
     tdCobDias.classList.add("is-numeric");
     tdCobDias.textContent = formatNumber(row.cobertura_dias_30);
 
     const d = row.cobertura_dias_30;
-    if (d <= 30)        tdCobDias.classList.add("heat-low");
-    else if (d <= 90)   tdCobDias.classList.add("heat-mid");
-    else if (d > 90)    tdCobDias.classList.add("heat-high");
+    if (d <= 30) tdCobDias.classList.add("heat-low");
+    else if (d > 30 && d <= 90) tdCobDias.classList.add("heat-mid");
+    else if (d > 90) tdCobDias.classList.add("heat-high");
 
     tr.appendChild(tdCobDias);
 
-    tbody.appendChild(tr);
+    fragment.appendChild(tr);
   });
+
+  tbody.appendChild(fragment);
 }
 
 function formatNumber(n, decimals = 0) {
@@ -530,7 +655,67 @@ function actualizarContadoresChips() {
   const chips = document.querySelectorAll("#clasifChips .chip");
   chips.forEach((chip) => {
     const value = chip.dataset.value;
-    const span  = chip.querySelector("span");
+    const span = chip.querySelector("span");
     span.textContent = (conteos[value] || 0).toLocaleString();
   });
+}
+
+// =========================
+// EXPORTAR CSV FILTRADO
+// =========================
+
+function exportFilteredCSV() {
+  if (!filteredData.length) {
+    alert("No hay datos filtrados para exportar.");
+    return;
+  }
+
+  const headers = [
+    "Codigo",
+    "Clave",
+    "Descripcion",
+    "Inv",
+    "Clasificacion",
+    "Promedio Vta Mes",
+    "Cobertura (Mes)",
+    "Cobertura Dias (30)",
+  ];
+
+  const rows = filteredData.map((r) => [
+    r.codigo ?? "",
+    r.clave ?? "",
+    (r.desc_prod ?? "").replace(/"/g, '""'),
+    r.inv ?? "",
+    r.clasificacion ?? "",
+    r.promedio_vta_mes ?? "",
+    r.cobertura_mes ?? "",
+    r.cobertura_dias_30 ?? "",
+  ]);
+
+  const csvLines = [headers.join(",")].concat(
+    rows.map((row) =>
+      row
+        .map((val) => {
+          const s = String(val);
+          if (s.includes(",") || s.includes('"')) {
+            return `"${s.replace(/"/g, '""')}"`;
+          }
+          return s;
+        })
+        .join(",")
+    )
+  );
+
+  const blob = new Blob([csvLines.join("\n")], {
+    type: "text/csv;charset=utf-8;",
+  });
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "inventario_filtrado.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
