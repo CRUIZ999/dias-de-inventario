@@ -2,140 +2,195 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <title>Panel de Inventario CSV</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-  <!-- Fuente bonita -->
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
-
-  <!-- Estilos -->
+  <title>Panel de Inventario</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="topbar-left">
-      <span class="logo-dot"></span>
-      <h1>Panel de Inventario</h1>
-      <span class="topbar-subtitle">Archivo CSV delimitado por comas</span>
-    </div>
-
-    <div class="topbar-right">
-      <label class="file-label">
-        <input type="file" id="fileInput" accept=".csv" />
-        <span>Subir CSV</span>
-      </label>
-    </div>
-  </header>
-
-  <main class="layout">
-    <!-- Panel lateral de filtros -->
-    <aside class="sidebar">
-      <section class="sidebar-section">
-        <h2>Filtros</h2>
-
-        <div class="field">
-          <label for="searchInput">Buscar</label>
-          <input
-            type="text"
-            id="searchInput"
-            placeholder="Código, clave o descripción…"
-          />
+  <div class="app-shell">
+    <!-- TOP BAR -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="status-dot"></div>
+        <div>
+          <h1 class="app-title">Panel de Inventario</h1>
+          <p class="app-subtitle">Archivo CSV delimitado por comas</p>
         </div>
+      </div>
 
-        <div class="field">
-          <label>Clasificación</label>
-          <div id="clasifChips" class="chips">
-            <!-- Se genera dinámicamente cuando se carga el CSV -->
+      <div class="topbar-right">
+        <button id="exportCsvButton" class="btn ghost">Descargar CSV filtrado</button>
+        <label class="btn primary">
+          <span>↑ Subir CSV</span>
+          <input id="fileInput" type="file" accept=".csv" hidden />
+        </label>
+      </div>
+    </header>
+
+    <main class="layout">
+      <!-- SIDEBAR FILTROS -->
+      <aside class="sidebar">
+        <section class="panel">
+          <h2 class="panel-title">Filtros</h2>
+
+          <label class="field-label">Buscar</label>
+          <div class="field">
+            <input
+              id="searchInput"
+              type="text"
+              placeholder="Código, clave o descripción…"
+            />
           </div>
-        </div>
 
-        <div class="field">
-          <label for="coberturaSelect">Cobertura (Mes)</label>
-          <select id="coberturaSelect">
-            <option value="all">Todas</option>
-            <option value="critico">0 a &lt;=1 mes (crítico)</option>
-            <option value="medio">&gt;1 y &lt;=3 meses</option>
-            <option value="alto">&gt;3 meses</option>
-          </select>
-        </div>
+          <label class="field-label">Clasificación</label>
+          <div id="clasifChips" class="chips-container">
+            <!-- chips dinámicos -->
+          </div>
 
-        <button id="clearFiltersBtn" class="btn-secondary">
-          Limpiar filtros
-        </button>
+          <label class="field-label">Cobertura (Mes)</label>
+          <div class="field">
+            <select id="coberturaSelect">
+              <option value="all">Todas</option>
+              <option value="critico">Crítico (0 – 1)</option>
+              <option value="medio">Medio (1 – 3)</option>
+              <option value="alto">Alto (&gt; 3)</option>
+            </select>
+          </div>
+
+          <div class="field field-checkbox">
+            <label>
+              <input type="checkbox" id="onlyCriticalDays" />
+              <span>Solo cobertura ≤ 30 días</span>
+            </label>
+          </div>
+
+          <div class="field field-checkbox">
+            <label>
+              <input type="checkbox" id="onlyNoMovement" />
+              <span>Solo sin movimiento (Prom. Vta Mes = 0)</span>
+            </label>
+          </div>
+
+          <button id="clearFiltersBtn" class="btn full ghost">Limpiar filtros</button>
+        </section>
+
+        <section class="panel">
+          <h2 class="panel-title">Estado del archivo</h2>
+          <p id="fileStatus" class="file-status">
+            Aún no se ha cargado ningún CSV.
+          </p>
+        </section>
+
+        <section class="panel">
+          <div class="field field-checkbox">
+            <label>
+              <input type="checkbox" id="limitRowsToggle" checked />
+              <span>Limitar a 1,000 filas mostradas (más rápido)</span>
+            </label>
+          </div>
+          <p class="hint">
+            El filtrado siempre se hace sobre todas las filas, pero se pintan menos
+            en la tabla para que el buscador vaya más rápido.
+          </p>
+        </section>
+      </aside>
+
+      <!-- MAIN CONTENT -->
+      <section class="main">
+        <!-- KPIs -->
+        <section class="kpi-grid">
+          <article class="kpi-card">
+            <h3>Productos</h3>
+            <p id="kpiProductos" class="kpi-value">–</p>
+            <p class="kpi-caption">Filtrados / Totales</p>
+          </article>
+
+          <article class="kpi-card">
+            <h3>Inventario total</h3>
+            <p id="kpiInventario" class="kpi-value">–</p>
+            <p class="kpi-caption">Suma de Inv</p>
+          </article>
+
+          <article class="kpi-card">
+            <h3>Prom. venta mensual</h3>
+            <p id="kpiPromedioVenta" class="kpi-value">–</p>
+            <p class="kpi-caption">Suma Promedio Vta Mes</p>
+          </article>
+
+          <article class="kpi-card">
+            <h3>Cobertura promedio</h3>
+            <p id="kpiCobertura" class="kpi-value">–</p>
+            <p class="kpi-caption">Días (30)</p>
+          </article>
+        </section>
+
+        <!-- KPIs secundarios -->
+        <section class="kpi-grid kpi-grid-secondary">
+          <article class="kpi-card kpi-small">
+            <h3>Productos ≤ 30 días</h3>
+            <p id="kpiCriticos30" class="kpi-value">–</p>
+            <p class="kpi-caption">Cobertura Días (30) ≤ 30</p>
+          </article>
+
+          <article class="kpi-card kpi-small">
+            <h3>Productos sin movimiento</h3>
+            <p id="kpiSinMovimiento" class="kpi-value">–</p>
+            <p class="kpi-caption">Prom. Vta Mes = 0</p>
+          </article>
+
+          <article class="kpi-card kpi-small">
+            <h3>% sobre inventario</h3>
+            <p id="kpiPctCriticos" class="kpi-value">–</p>
+            <p class="kpi-caption">Inv de productos ≤ 30 días</p>
+          </article>
+        </section>
+
+        <!-- TABLA -->
+        <section class="panel panel-table">
+          <div class="panel-header">
+            <div>
+              <h2>Detalle de productos</h2>
+              <p class="panel-subtitle">
+                Da clic en los encabezados para ordenar.
+              </p>
+            </div>
+            <div class="rows-info" id="rowsInfo">0 registros</div>
+          </div>
+
+          <div class="table-wrapper">
+            <table id="dataTable">
+              <thead>
+                <tr>
+                  <th data-key="codigo">Código</th>
+                  <th data-key="clave">Clave</th>
+                  <th data-key="desc_prod">Descripción</th>
+                  <th data-key="inv" class="is-numeric">Inv</th>
+                  <th data-key="clasificacion">Clasificación</th>
+                  <th data-key="promedio_vta_mes" class="is-numeric">
+                    Promedio Vta Mes
+                  </th>
+                  <th data-key="cobertura_mes" class="is-numeric">
+                    Cobertura (Mes)
+                  </th>
+                  <th data-key="cobertura_dias_30" class="is-numeric">
+                    Cobertura Días (30)
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- filas dinámicas -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <footer class="footer">
+          Ferretería El Cedro · Panel ligero para análisis de CSV · Front-end
+          estático sobre GitHub Pages
+        </footer>
       </section>
-
-      <section class="sidebar-section">
-        <h2>Estado del archivo</h2>
-        <p id="fileStatus">Aún no se ha cargado ningún CSV.</p>
-      </section>
-    </aside>
-
-    <!-- Contenido principal -->
-    <section class="content">
-      <!-- KPIs -->
-      <div class="kpi-grid">
-        <div class="kpi-card">
-          <span class="kpi-label">Productos</span>
-          <span id="kpiProductos" class="kpi-value">–</span>
-          <span class="kpi-sub">Filtrados / Totales</span>
-        </div>
-        <div class="kpi-card">
-          <span class="kpi-label">Inventario total</span>
-          <span id="kpiInventario" class="kpi-value">–</span>
-          <span class="kpi-sub">Suma de Inv</span>
-        </div>
-        <div class="kpi-card">
-          <span class="kpi-label">Prom. venta mensual</span>
-          <span id="kpiPromedioVenta" class="kpi-value">–</span>
-          <span class="kpi-sub">Suma Promedio Vta Mes</span>
-        </div>
-        <div class="kpi-card">
-          <span class="kpi-label">Cobertura promedio</span>
-          <span id="kpiCobertura" class="kpi-value">–</span>
-          <span class="kpi-sub">Días (30)</span>
-        </div>
-      </div>
-
-      <!-- Resumen por clasificación -->
-      <div class="summary-grid" id="clasifSummary">
-        <!-- Se llena dinámicamente -->
-      </div>
-
-      <!-- Tabla -->
-      <div class="table-card">
-        <div class="table-header">
-          <h2>Detalle de productos</h2>
-          <span id="rowsInfo" class="rows-info">0 registros</span>
-        </div>
-        <div class="table-wrapper">
-          <table id="dataTable">
-            <thead>
-              <tr>
-                <th data-key="codigo">Código</th>
-                <th data-key="clave">Clave</th>
-                <th data-key="desc_prod">Descripción</th>
-                <th data-key="inv" class="is-numeric">Inv</th>
-                <th data-key="clasificacion">Clasificación</th>
-                <th data-key="promedio_vta_mes" class="is-numeric">Promedio Vta Mes</th>
-                <th data-key="cobertura_mes" class="is-numeric">Cobertura (Mes)</th>
-                <th data-key="cobertura_dias_30" class="is-numeric">Cobertura Días (30)</th>
-              </tr>
-            </thead>
-            <tbody>
-              <!-- Filas generadas por JS -->
-            </tbody>
-          </table>
-        </div>
-        <p class="helper-text">
-          Da clic en los encabezados para ordenar. La tabla sólo usa los datos del CSV que subas.
-        </p>
-      </div>
-    </section>
-  </main>
-
-  <footer class="footer">
-    <small>Ferretería El Cedro · Panel ligero para análisis de CSV · Solo front-end (GitHub Pages)</small>
-  </footer>
+    </main>
+  </div>
 
   <script src="app.js"></script>
 </body>
