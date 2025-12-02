@@ -1,622 +1,474 @@
-// =========================
-// CONFIGURACIÓN
-// =========================
+/* =========
+   Layout base
+   ========= */
 
-// Pon aquí la ruta de tu CSV.
-// Si lo tienes en la raíz del repo con este nombre:
-const CSV_URL = "inventario.csv";
-
-// Máximo de filas que se pintan en la tabla cuando el límite está activo
-const MAX_ROWS_RENDER = 1000;
-
-// Datos en memoria
-let rawData = []; // todos los registros
-let filteredData = []; // registros filtrados (último resultado de filtros)
-
-let sortConfig = {
-  key: null,
-  direction: "asc", // "asc" o "desc"
-};
-
-const state = {
-  search: "",
-  filtroCobertura: "all", // all | critico | medio | alto
-  onlyCriticalDays: false, // Cobertura Días (30) <= 30
-  onlyNoMovement: false, // Promedio Vta Mes = 0
-  limitRows: true, // limitar filas pintadas
-};
-
-// =========================
-// INICIALIZACIÓN
-// =========================
-
-document.addEventListener("DOMContentLoaded", () => {
-  // Cargar CSV automáticamente
-  cargarCSVDesdeRepositorio();
-
-  const fileInput = document.getElementById("fileInput");
-  const searchInput = document.getElementById("searchInput");
-  const coberturaSelect = document.getElementById("coberturaSelect");
-  const clearFiltersBtn = document.getElementById("clearFiltersBtn");
-  const onlyCriticalDays = document.getElementById("onlyCriticalDays");
-  const onlyNoMovement = document.getElementById("onlyNoMovement");
-  const limitRowsToggle = document.getElementById("limitRowsToggle");
-  const exportCsvButton = document.getElementById("exportCsvButton");
-  const headerCells = document.querySelectorAll("#dataTable thead th");
-
-  // Guardar etiqueta original de cada encabezado (para mostrar ▲▼)
-  headerCells.forEach((th) => {
-    th.dataset.label = th.textContent.trim();
-  });
-
-  // Subir CSV manual (opcional)
-  if (fileInput) {
-    fileInput.addEventListener("change", handleFileUpload);
-  }
-
-  // Buscador con debounce para que sea más rápido
-  if (searchInput) {
-    const debouncedSearch = debounce((value) => {
-      state.search = value.toLowerCase();
-      aplicarFiltrosYRender();
-    }, 250);
-
-    searchInput.addEventListener("input", (e) => {
-      debouncedSearch(e.target.value || "");
-    });
-  }
-
-  if (coberturaSelect) {
-    coberturaSelect.addEventListener("change", (e) => {
-      state.filtroCobertura = e.target.value;
-      aplicarFiltrosYRender();
-    });
-  }
-
-  if (onlyCriticalDays) {
-    onlyCriticalDays.addEventListener("change", (e) => {
-      state.onlyCriticalDays = e.target.checked;
-      aplicarFiltrosYRender();
-    });
-  }
-
-  if (onlyNoMovement) {
-    onlyNoMovement.addEventListener("change", (e) => {
-      state.onlyNoMovement = e.target.checked;
-      aplicarFiltrosYRender();
-    });
-  }
-
-  if (limitRowsToggle) {
-    limitRowsToggle.addEventListener("change", (e) => {
-      state.limitRows = e.target.checked;
-      // Solo re-renderizamos tabla, los datos filtrados ya están calculados
-      renderTable(filteredData);
-    });
-  }
-
-  if (clearFiltersBtn) {
-    clearFiltersBtn.addEventListener("click", () => {
-      if (searchInput) searchInput.value = "";
-      state.search = "";
-      state.filtroCobertura = "all";
-      state.onlyCriticalDays = false;
-      state.onlyNoMovement = false;
-
-      if (coberturaSelect) coberturaSelect.value = "all";
-      if (onlyCriticalDays) onlyCriticalDays.checked = false;
-      if (onlyNoMovement) onlyNoMovement.checked = false;
-
-      aplicarFiltrosYRender();
-    });
-  }
-
-  if (exportCsvButton) {
-    exportCsvButton.addEventListener("click", exportFilteredCSV);
-  }
-
-  headerCells.forEach((th) => {
-    th.addEventListener("click", () => {
-      const key = th.getAttribute("data-key");
-      if (!key) return;
-      sortByColumn(key, th.classList.contains("is-numeric"), th);
-    });
-  });
-});
-
-// =========================
-// DEBOUNCE
-// =========================
-
-function debounce(fn, delay) {
-  let timer = null;
-  return (...args) => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), delay);
-  };
+:root {
+  --bg-body: #050816;
+  --bg-panel: #080f1f;
+  --bg-panel-soft: #101827;
+  --accent: #38bdf8;
+  --accent-soft: rgba(56, 189, 248, 0.1);
+  --text-main: #f9fafb;
+  --text-muted: #9ca3af;
+  --border-subtle: #1f2933;
+  --danger: #f97373;
+  --warning: #facc15;
+  --success: #22c55e;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-// =========================
-// CARGA AUTOMÁTICA DESDE EL REPO
-// =========================
-
-async function cargarCSVDesdeRepositorio() {
-  const statusEl = document.getElementById("fileStatus");
-
-  try {
-    if (statusEl) statusEl.textContent = `Cargando CSV (${CSV_URL})…`;
-
-    const resp = await fetch(CSV_URL);
-    if (!resp.ok) {
-      throw new Error("HTTP " + resp.status + " al leer " + CSV_URL);
-    }
-
-    const text = await resp.text();
-
-    rawData = parseCSV(text);
-    filteredData = [...rawData];
-
-    if (statusEl) {
-      statusEl.textContent = `CSV cargado automáticamente (${rawData.length} filas).`;
-    }
-
-    aplicarFiltrosYRender(true);
-  } catch (err) {
-    console.error("Error al cargar CSV desde el repositorio:", err);
-    if (statusEl) {
-      statusEl.textContent =
-        "Error al cargar el CSV desde GitHub. Verifica la ruta en CSV_URL y que el archivo exista.";
-    }
-  }
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
-// =========================
-// SUBIR CSV MANUAL (OPCIONAL)
-// =========================
-
-function handleFileUpload(ev) {
-  const file = ev.target.files[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const text = e.target.result;
-
-    rawData = parseCSV(text);
-    filteredData = [...rawData];
-
-    const statusEl = document.getElementById("fileStatus");
-    if (statusEl) {
-      statusEl.textContent = `Archivo cargado manualmente (${rawData.length} filas).`;
-    }
-
-    aplicarFiltrosYRender(true);
-  };
-
-  reader.readAsText(file, "UTF-8");
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: var(--font-sans);
+  background: radial-gradient(circle at top, #111827 0, #020617 55%);
+  color: var(--text-main);
 }
 
-// =========================
-// PARSE CSV
-// =========================
-
-function parseCSV(text) {
-  const lines = text.trim().split(/\r?\n/);
-  if (lines.length <= 1) return [];
-
-  const firstLine = lines[0];
-  const delimiter =
-    firstLine.split(";").length > firstLine.split(",").length ? ";" : ",";
-
-  const headers = firstLine.split(delimiter).map((h) => h.trim().toLowerCase());
-
-  const idx = {
-    codigo: headers.indexOf("codigo"),
-    clave: headers.indexOf("clave"),
-    desc_prod: headers.indexOf("desc_prod"),
-    inv: headers.indexOf("inv"),
-    clasificacion: headers.indexOf("clasificacion"),
-    promedio_vta_mes: headers.indexOf("promedio vta mes"),
-    cobertura_mes: headers.indexOf("cobertura (mes)"),
-    cobertura_dias_30: headers.indexOf("cobertura dias (30)"),
-  };
-
-  return lines.slice(1).reduce((acc, line) => {
-    if (!line.trim()) return acc;
-
-    const cols = line.split(delimiter);
-
-    const record = {
-      codigo: getCell(cols, idx.codigo),
-      clave: getCell(cols, idx.clave),
-      desc_prod: getCell(cols, idx.desc_prod),
-      inv: parseNumber(getCell(cols, idx.inv)),
-      clasificacion: getCell(cols, idx.clasificacion),
-      promedio_vta_mes: parseNumber(getCell(cols, idx.promedio_vta_mes)),
-      cobertura_mes: parseNumber(getCell(cols, idx.cobertura_mes)),
-      cobertura_dias_30: parseNumber(getCell(cols, idx.cobertura_dias_30)),
-    };
-
-    // Índice de búsqueda (para no recalcular toLowerCase en cada filtro)
-    record._search = (
-      (record.codigo || "") +
-      " " +
-      (record.clave || "") +
-      " " +
-      (record.desc_prod || "")
-    )
-      .toString()
-      .toLowerCase();
-
-    acc.push(record);
-    return acc;
-  }, []);
+body {
+  display: flex;
+  justify-content: center;
 }
 
-function getCell(cols, index) {
-  if (index === -1 || index == null) return "";
-  return (cols[index] || "").trim();
+/* =========
+   App shell
+   ========= */
+
+.app-shell {
+  width: 100%;
+  max-width: 1440px;
+  min-height: 100vh;
+  padding: 16px;
 }
 
-function parseNumber(v) {
-  if (!v) return 0;
-  const normalized = v.replace(/,/g, "");
-  const n = parseFloat(normalized);
-  return isNaN(n) ? 0 : n;
+/* Topbar */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-radius: 999px;
+  background: linear-gradient(120deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.9));
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.9);
+  margin-bottom: 18px;
 }
 
-// =========================
-// FILTROS
-// =========================
-
-function aplicarFiltrosYRender(resetSort = false) {
-  if (!rawData.length) {
-    renderTable([]);
-    renderKPIs([]);
-    return;
-  }
-
-  let data = [...rawData];
-
-  // Búsqueda
-  if (state.search) {
-    const term = state.search;
-    data = data.filter((row) => row._search && row._search.includes(term));
-  }
-
-  // Filtro por cobertura (Mes)
-  if (state.filtroCobertura !== "all") {
-    data = data.filter((row) => {
-      const c = row.cobertura_mes;
-      if (state.filtroCobertura === "critico") return c >= 0 && c <= 1;
-      if (state.filtroCobertura === "medio") return c > 1 && c <= 3;
-      if (state.filtroCobertura === "alto") return c > 3;
-      return true;
-    });
-  }
-
-  // Solo cobertura <= 30 días
-  if (state.onlyCriticalDays) {
-    data = data.filter((row) => (row.cobertura_dias_30 || 0) <= 30);
-  }
-
-  // Solo sin movimiento (Promedio Vta Mes = 0)
-  if (state.onlyNoMovement) {
-    data = data.filter((row) => (row.promedio_vta_mes || 0) === 0);
-  }
-
-  filteredData = data;
-
-  if (resetSort) {
-    sortConfig.key = null;
-    sortConfig.direction = "asc";
-  }
-
-  if (sortConfig.key) {
-    data = sortData([...data], sortConfig.key);
-  }
-
-  renderKPIs(data);
-  renderTable(data);
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-// =========================
-// ORDENAR TABLA
-// =========================
-
-function sortByColumn(key, isNumericOverride, clickedTh) {
-  if (!key) return;
-
-  if (sortConfig.key === key) {
-    sortConfig.direction = sortConfig.direction === "asc" ? "desc" : "asc";
-  } else {
-    sortConfig.key = key;
-    sortConfig.direction = "asc";
-  }
-
-  const data = sortData([...filteredData], key, isNumericOverride);
-
-  // Actualizar flechitas en encabezados
-  const headerCells = document.querySelectorAll("#dataTable thead th");
-  headerCells.forEach((th) => {
-    const baseLabel = th.dataset.label || th.textContent.trim();
-    th.textContent = baseLabel;
-  });
-
-  if (clickedTh) {
-    const baseLabel = clickedTh.dataset.label || clickedTh.textContent.trim();
-    const arrow = sortConfig.direction === "asc" ? " ▲" : " ▼";
-    clickedTh.textContent = baseLabel + arrow;
-  }
-
-  renderTable(data);
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--success);
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.8);
 }
 
-function sortData(data, key, isNumericOverride = false) {
-  const dir = sortConfig.direction === "asc" ? 1 : -1;
-
-  return data.sort((a, b) => {
-    const va = a[key];
-    const vb = b[key];
-
-    const isNumeric =
-      isNumericOverride || typeof va === "number" || typeof vb === "number";
-
-    if (isNumeric) {
-      return (va - vb) * dir;
-    }
-    return String(va).localeCompare(String(vb)) * dir;
-  });
+.app-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
 }
 
-// =========================
-// KPIs
-// =========================
+.app-subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
 
-function renderKPIs(data) {
-  const total = rawData.length;
-  const filtrados = data.length;
+.topbar-right {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
 
-  const kpiProductos = document.getElementById("kpiProductos");
-  const kpiInventario = document.getElementById("kpiInventario");
-  const kpiPromedioVenta = document.getElementById("kpiPromedioVenta");
-  const kpiCobertura = document.getElementById("kpiCobertura");
-  const kpiCriticos30 = document.getElementById("kpiCriticos30");
-  const kpiMayor3Meses = document.getElementById("kpiMayor3Meses");
-  const kpiPctCriticos = document.getElementById("kpiPctCriticos");
+/* Botones */
 
-  if (!data.length) {
-    if (kpiProductos) kpiProductos.textContent = `0 / ${total}`;
-    if (kpiInventario) kpiInventario.textContent = "0";
-    if (kpiPromedioVenta) kpiPromedioVenta.textContent = "0";
-    if (kpiCobertura) kpiCobertura.textContent = "0";
-    if (kpiCriticos30) kpiCriticos30.textContent = "0";
-    if (kpiMayor3Meses) kpiMayor3Meses.textContent = "0";
-    if (kpiPctCriticos) kpiPctCriticos.textContent = "0%";
-    return;
+.btn {
+  border-radius: 999px;
+  border: 1px solid transparent;
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  color: var(--text-main);
+  transition: all 0.15s ease-out;
+}
+
+.btn.primary {
+  background: linear-gradient(135deg, var(--accent), #0ea5e9);
+  color: #0b1120;
+  font-weight: 600;
+}
+
+.btn.primary:hover {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.btn.ghost {
+  border-color: rgba(148, 163, 184, 0.35);
+  background: radial-gradient(circle at top left, rgba(148, 163, 184, 0.16), transparent 55%);
+}
+
+.btn.ghost:hover {
+  border-color: rgba(148, 163, 184, 0.7);
+  background-color: rgba(15, 23, 42, 0.9);
+}
+
+.btn.full {
+  width: 100%;
+}
+
+/* =========
+   Layout principal
+   ========= */
+
+.layout {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 16px;
+}
+
+/* Sidebar */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Panel genérico */
+
+.panel {
+  background: radial-gradient(circle at top left, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.96));
+  border-radius: 18px;
+  padding: 14px 16px;
+  border: 1px solid rgba(31, 41, 55, 0.9);
+  box-shadow: 0 12px 35px rgba(15, 23, 42, 0.85);
+}
+
+.panel-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Form / campos */
+
+.field {
+  margin-bottom: 12px;
+}
+
+.field-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  display: block;
+}
+
+input[type="text"],
+select {
+  width: 100%;
+  background: #020617;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 41, 55, 0.85);
+  padding: 7px 11px;
+  color: var(--text-main);
+  font-size: 13px;
+  outline: none;
+  transition: all 0.12s ease-out;
+}
+
+input[type="text"]:focus,
+select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.4);
+}
+
+.field-checkbox {
+  margin-top: 4px;
+  margin-bottom: 10px;
+}
+
+.field-checkbox label {
+  font-size: 13px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-checkbox input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+}
+
+.file-status {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* =========
+   Main content
+   ========= */
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* KPIs */
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.kpi-grid-secondary {
+  margin-top: 4px;
+}
+
+.kpi-card {
+  background: radial-gradient(circle at top left, rgba(15, 23, 42, 0.95), rgba(15, 23, 42, 0.9));
+  border-radius: 20px;
+  padding: 10px 12px;
+  border: 1px solid rgba(31, 41, 55, 0.9);
+  box-shadow: 0 14px 35px rgba(15, 23, 42, 0.9);
+}
+
+.kpi-card.kpi-small {
+  border-radius: 16px;
+  padding: 8px 10px;
+}
+
+.kpi-card h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.kpi-value {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.kpi-caption {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Tabla */
+
+.panel-table {
+  margin-top: 4px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.panel-header h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.panel-subtitle {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.rows-info {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.table-wrapper {
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+  border-radius: 16px;
+  border: 1px solid rgba(31, 41, 55, 0.95);
+}
+
+/* Forzar que no se vean chips si existiera algún HTML viejo */
+.chips-container,
+label.field-label + .chips-container {
+  display: none !important;
+}
+
+/* Tabla base */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+thead th {
+  background: #020617;
+  color: var(--text-muted);
+  text-align: left;
+  padding: 7px 8px;
+  font-weight: 500;
+  border-bottom: 1px solid rgba(31, 41, 55, 0.9);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+thead th.is-numeric {
+  text-align: right;
+}
+
+thead th:hover {
+  background: #020617;
+  color: var(--text-main);
+}
+
+tbody tr:nth-child(even) {
+  background-color: #020617;
+}
+
+tbody tr:nth-child(odd) {
+  background-color: #020818;
+}
+
+tbody tr:hover {
+  background: linear-gradient(90deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 1));
+}
+
+td {
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.9);
+}
+
+td.is-numeric {
+  text-align: right;
+}
+
+/* Clasificación badge */
+
+.badge-clasif {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(75, 85, 99, 0.9);
+}
+
+.badge-clasif.A {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.8);
+}
+
+.badge-clasif.B {
+  background: rgba(234, 179, 8, 0.12);
+  border-color: rgba(234, 179, 8, 0.8);
+}
+
+.badge-clasif.C,
+.badge-clasif["C"] {
+  background: rgba(249, 115, 22, 0.12);
+  border-color: rgba(249, 115, 22, 0.8);
+}
+
+/* Heatmap cobertura días */
+
+.heat-low {
+  background: radial-gradient(circle at left, rgba(34, 197, 94, 0.32), transparent 70%);
+}
+
+.heat-mid {
+  background: radial-gradient(circle at left, rgba(234, 179, 8, 0.32), transparent 70%);
+}
+
+.heat-high {
+  background: radial-gradient(circle at left, rgba(239, 68, 68, 0.45), transparent 70%);
+}
+
+/* Footer */
+
+.footer {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+/* Responsive */
+
+@media (max-width: 1024px) {
+  .layout {
+    grid-template-columns: 1fr;
   }
 
-  const invTotal = data.reduce((acc, r) => acc + (r.inv || 0), 0);
-  const promVenta = data.reduce(
-    (acc, r) => acc + (r.promedio_vta_mes || 0),
-    0
-  );
-  const promCobertura =
-    data.reduce((acc, r) => acc + (r.cobertura_dias_30 || 0), 0) /
-    data.length;
-
-  const productosCriticos30 = data.filter(
-    (r) => (r.cobertura_dias_30 || 0) <= 30
-  ).length;
-
-  // SKUs con inventario > 3 meses (cobertura_mes > 3)
-  const skusMayor3Meses = data.filter(
-    (r) => (r.cobertura_mes || 0) > 3
-  ).length;
-
-  const invCriticos30 = data.reduce((acc, r) => {
-    if ((r.cobertura_dias_30 || 0) <= 30) {
-      return acc + (r.inv || 0);
-    }
-    return acc;
-  }, 0);
-
-  const invTotalData = data.reduce((acc, r) => acc + (r.inv || 0), 0);
-  const pctCriticosInv =
-    invTotalData > 0 ? (invCriticos30 / invTotalData) * 100 : 0;
-
-  if (kpiProductos) {
-    kpiProductos.textContent = `${filtrados.toLocaleString()} / ${total.toLocaleString()}`;
+  .sidebar {
+    flex-direction: row;
+    overflow-x: auto;
   }
 
-  if (kpiInventario) {
-    kpiInventario.textContent = invTotal.toLocaleString(undefined, {
-      maximumFractionDigits: 0,
-    });
+  .sidebar .panel {
+    min-width: 260px;
   }
 
-  if (kpiPromedioVenta) {
-    kpiPromedioVenta.textContent = promVenta.toLocaleString(undefined, {
-      maximumFractionDigits: 0,
-    });
-  }
-
-  if (kpiCobertura) {
-    kpiCobertura.textContent = promCobertura.toLocaleString(undefined, {
-      minimumFractionDigits: 1,
-      maximumFractionDigits: 1,
-    });
-  }
-
-  if (kpiCriticos30) {
-    kpiCriticos30.textContent =
-      productosCriticos30.toLocaleString(undefined, {
-        maximumFractionDigits: 0,
-      });
-  }
-
-  if (kpiMayor3Meses) {
-    kpiMayor3Meses.textContent = skusMayor3Meses.toLocaleString(undefined, {
-      maximumFractionDigits: 0,
-    });
-  }
-
-  if (kpiPctCriticos) {
-    kpiPctCriticos.textContent = `${pctCriticosInv.toLocaleString(undefined, {
-      maximumFractionDigits: 1,
-    })}%`;
+  .table-wrapper {
+    max-height: 60vh;
   }
 }
 
-// =========================
-// TABLA
-// =========================
-
-function renderTable(data) {
-  const tbody = document.querySelector("#dataTable tbody");
-  if (!tbody) return;
-
-  tbody.innerHTML = "";
-
-  const rowsInfo = document.getElementById("rowsInfo");
-  const totalRows = data.length;
-
-  let rowsToRender = data;
-  if (state.limitRows && data.length > MAX_ROWS_RENDER) {
-    rowsToRender = data.slice(0, MAX_ROWS_RENDER);
+@media (max-width: 768px) {
+  .topbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
   }
 
-  if (rowsInfo) {
-    if (state.limitRows && totalRows > MAX_ROWS_RENDER) {
-      rowsInfo.textContent = `${rowsToRender.length.toLocaleString()} de ${totalRows.toLocaleString()} registros (limitado para mejor rendimiento)`;
-    } else {
-      rowsInfo.textContent = `${totalRows.toLocaleString()} registros`;
-    }
+  .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  if (!rowsToRender.length) return;
-
-  const fragment = document.createDocumentFragment();
-
-  rowsToRender.forEach((row) => {
-    const tr = document.createElement("tr");
-
-    const tdCodigo = document.createElement("td");
-    tdCodigo.textContent = row.codigo;
-    tr.appendChild(tdCodigo);
-
-    const tdClave = document.createElement("td");
-    tdClave.textContent = row.clave;
-    tr.appendChild(tdClave);
-
-    const tdDesc = document.createElement("td");
-    tdDesc.textContent = row.desc_prod;
-    tr.appendChild(tdDesc);
-
-    const tdInv = document.createElement("td");
-    tdInv.classList.add("is-numeric");
-    tdInv.textContent = formatNumber(row.inv);
-    tr.appendChild(tdInv);
-
-    const tdClasif = document.createElement("td");
-    const badge = document.createElement("span");
-    const c = row.clasificacion || "Sin";
-    badge.className = `badge-clasif ${c}`;
-    badge.textContent = c;
-    tdClasif.appendChild(badge);
-    tr.appendChild(tdClasif);
-
-    const tdProm = document.createElement("td");
-    tdProm.classList.add("is-numeric");
-    tdProm.textContent = formatNumber(row.promedio_vta_mes);
-    tr.appendChild(tdProm);
-
-    const tdCobMes = document.createElement("td");
-    tdCobMes.classList.add("is-numeric");
-    tdCobMes.textContent = formatNumber(row.cobertura_mes, 1);
-    tr.appendChild(tdCobMes);
-
-    const tdCobDias = document.createElement("td");
-    tdCobDias.classList.add("is-numeric");
-    tdCobDias.textContent = formatNumber(row.cobertura_dias_30);
-
-    const d = row.cobertura_dias_30;
-    if (d <= 30) tdCobDias.classList.add("heat-low");
-    else if (d > 30 && d <= 90) tdCobDias.classList.add("heat-mid");
-    else if (d > 90) tdCobDias.classList.add("heat-high");
-
-    tr.appendChild(tdCobDias);
-
-    fragment.appendChild(tr);
-  });
-
-  tbody.appendChild(fragment);
-}
-
-function formatNumber(n, decimals = 0) {
-  if (typeof n !== "number") return "";
-  return n.toLocaleString(undefined, {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
-}
-
-// =========================
-// EXPORTAR CSV FILTRADO
-// =========================
-
-function exportFilteredCSV() {
-  if (!filteredData.length) {
-    alert("No hay datos filtrados para exportar.");
-    return;
+  .kpi-grid-secondary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
-  const headers = [
-    "Codigo",
-    "Clave",
-    "Descripcion",
-    "Inv",
-    "Clasificacion",
-    "Promedio Vta Mes",
-    "Cobertura (Mes)",
-    "Cobertura Dias (30)",
-  ];
-
-  const rows = filteredData.map((r) => [
-    r.codigo ?? "",
-    r.clave ?? "",
-    (r.desc_prod ?? "").replace(/"/g, '""'),
-    r.inv ?? "",
-    r.clasificacion ?? "",
-    r.promedio_vta_mes ?? "",
-    r.cobertura_mes ?? "",
-    r.cobertura_dias_30 ?? "",
-  ]);
-
-  const csvLines = [headers.join(",")].concat(
-    rows.map((row) =>
-      row
-        .map((val) => {
-          const s = String(val);
-          if (s.includes(",") || s.includes('"')) {
-            return `"${s.replace(/"/g, '""')}"`;
-          }
-          return s;
-        })
-        .join(",")
-    )
-  );
-
-  const blob = new Blob([csvLines.join("\n")], {
-    type: "text/csv;charset=utf-8;",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "inventario_filtrado.csv";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }
