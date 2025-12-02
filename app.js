@@ -4,7 +4,7 @@
 
 // CSV alojado en tu repositorio (rama main)
 const CSV_URL =
-  "https://raw.githubusercontent.com/CRUIZ999/dias-de-inventario/main/D%C3%ADas%20de%20Inventario.csv";
+  "https://raw.githubusercontent.com/CRUIZ999/dias-de-inventario/main/inventario.csv";
 
 // Datos en memoria
 let rawData = []; // todos los registros
@@ -504,3 +504,4 @@ function actualizarContadoresChips() {
     span.textContent = (conteos[value] || 0).toLocaleString();
   });
 }
+
