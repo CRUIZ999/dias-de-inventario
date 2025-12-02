@@ -42,11 +42,6 @@
             />
           </div>
 
-          <label class="field-label">Clasificación</label>
-          <div id="clasifChips" class="chips-container">
-            <!-- chips dinámicos -->
-          </div>
-
           <label class="field-label">Cobertura (Mes)</label>
           <div class="field">
             <select id="coberturaSelect">
@@ -133,9 +128,9 @@
           </article>
 
           <article class="kpi-card kpi-small">
-            <h3>Productos sin movimiento</h3>
-            <p id="kpiSinMovimiento" class="kpi-value">–</p>
-            <p class="kpi-caption">Prom. Vta Mes = 0</p>
+            <h3>SKUs con inventario &gt; 3 meses</h3>
+            <p id="kpiMayor3Meses" class="kpi-value">–</p>
+            <p class="kpi-caption">Cobertura (Mes) &gt; 3</p>
           </article>
 
           <article class="kpi-card kpi-small">
@@ -151,7 +146,7 @@
             <div>
               <h2>Detalle de productos</h2>
               <p class="panel-subtitle">
-                Da clic en los encabezados para ordenar.
+                Da clic en los encabezados para ordenar (A–Z / Z–A o mayor–menor).
               </p>
             </div>
             <div class="rows-info" id="rowsInfo">0 registros</div>
