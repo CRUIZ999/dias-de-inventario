@@ -2,12 +2,12 @@
 // CONFIGURACIÓN
 // =========================
 
-// CSV alojado en tu repositorio (rama main)
-const CSV_URL =
-  "https://raw.githubusercontent.com/CRUIZ999/dias-de-inventario/main/inventario.csv";
+// CSV en la MISMA carpeta que index.html, app.js y styles.css
+// Nombre del archivo en el repo: inventario.csv
+const CSV_URL = "inventario.csv";
 
 // Datos en memoria
-let rawData = []; // todos los registros
+let rawData = [];      // todos los registros
 let filteredData = []; // registros filtrados
 
 let sortConfig = {
@@ -17,8 +17,8 @@ let sortConfig = {
 
 const state = {
   search: "",
-  clasifActivas: new Set(), // ej: { "A", "B" }
-  filtroCobertura: "all", // all | critico | medio | alto
+  clasifActivas: new Set(),   // ej: { "A", "B" }
+  filtroCobertura: "all",     // all | critico | medio | alto
 };
 
 // =========================
@@ -26,16 +26,17 @@ const state = {
 // =========================
 
 document.addEventListener("DOMContentLoaded", () => {
-  // Cargar CSV automáticamente desde GitHub
-  cargarCSVDesdeGitHub();
+  // 1) Cargar CSV automáticamente al abrir la página
+  cargarCSVDesdeRepositorio();
 
-  const fileInput = document.getElementById("fileInput");
-  const searchInput = document.getElementById("searchInput");
+  // 2) Listeners de UI
+  const fileInput       = document.getElementById("fileInput");
+  const searchInput     = document.getElementById("searchInput");
   const coberturaSelect = document.getElementById("coberturaSelect");
   const clearFiltersBtn = document.getElementById("clearFiltersBtn");
-  const headerCells = document.querySelectorAll("#dataTable thead th");
+  const headerCells     = document.querySelectorAll("#dataTable thead th");
 
-  // Opción: permitir subir otro CSV manualmente (sobrescribe datos)
+  // Opción extra: permitir subir otro CSV manualmente (sobrescribe datos)
   if (fileInput) {
     fileInput.addEventListener("change", handleFileUpload);
   }
@@ -75,22 +76,25 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 // =========================
-// CARGA AUTOMÁTICA DESDE GITHUB
+// CARGA AUTOMÁTICA DESDE EL REPO
 // =========================
 
-async function cargarCSVDesdeGitHub() {
+async function cargarCSVDesdeRepositorio() {
   const statusEl = document.getElementById("fileStatus");
-  try {
-    if (statusEl) statusEl.textContent = "Cargando CSV desde GitHub…";
 
+  try {
+    if (statusEl) statusEl.textContent = "Cargando CSV (inventario.csv)…";
+
+    // Como el CSV está en la misma carpeta, basta la ruta relativa
     const resp = await fetch(CSV_URL);
+
     if (!resp.ok) {
-      throw new Error("Respuesta HTTP no OK: " + resp.status);
+      throw new Error("HTTP " + resp.status + " al leer " + CSV_URL);
     }
 
     const text = await resp.text();
 
-    rawData = parseCSV(text);
+    rawData      = parseCSV(text);
     filteredData = [...rawData];
 
     if (statusEl) {
@@ -99,11 +103,12 @@ async function cargarCSVDesdeGitHub() {
 
     construirChipsClasificacion(rawData);
     aplicarFiltrosYRender(true);
+
   } catch (err) {
-    console.error("Error al cargar CSV desde GitHub:", err);
+    console.error("Error al cargar CSV desde el repositorio:", err);
     if (statusEl) {
       statusEl.textContent =
-        "Error al cargar el CSV desde GitHub. Puedes subirlo manualmente.";
+        "Error al cargar el CSV desde GitHub. Verifica que 'inventario.csv' exista en la misma carpeta.";
     }
   }
 }
@@ -119,7 +124,8 @@ function handleFileUpload(ev) {
   const reader = new FileReader();
   reader.onload = (e) => {
     const text = e.target.result;
-    rawData = parseCSV(text);
+
+    rawData      = parseCSV(text);
     filteredData = [...rawData];
 
     const statusEl = document.getElementById("fileStatus");
@@ -142,12 +148,14 @@ function parseCSV(text) {
   const lines = text.trim().split(/\r?\n/);
   if (lines.length <= 1) return [];
 
-  // Detección sencilla de delimitador: , o ;
+  // Detectar si usa , o ; como separador
   const firstLine = lines[0];
-  const delimiter = firstLine.split(";").length > firstLine.split(",").length ? ";" : ",";
+  const delimiter =
+    firstLine.split(";").length > firstLine.split(",").length ? ";" : ",";
 
   const headers = firstLine.split(delimiter).map((h) => h.trim().toLowerCase());
 
+  // Buscar índices según tus encabezados reales del CSV
   const idx = {
     codigo: headers.indexOf("codigo"),
     clave: headers.indexOf("clave"),
@@ -161,17 +169,18 @@ function parseCSV(text) {
 
   return lines.slice(1).reduce((acc, line) => {
     if (!line.trim()) return acc;
+
     const cols = line.split(delimiter);
 
     const record = {
-      codigo: getCell(cols, idx.codigo),
-      clave: getCell(cols, idx.clave),
-      desc_prod: getCell(cols, idx.desc_prod),
-      inv: parseNumber(getCell(cols, idx.inv)),
-      clasificacion: getCell(cols, idx.clasificacion),
+      codigo:           getCell(cols, idx.codigo),
+      clave:            getCell(cols, idx.clave),
+      desc_prod:        getCell(cols, idx.desc_prod),
+      inv:              parseNumber(getCell(cols, idx.inv)),
+      clasificacion:    getCell(cols, idx.clasificacion),
       promedio_vta_mes: parseNumber(getCell(cols, idx.promedio_vta_mes)),
-      cobertura_mes: parseNumber(getCell(cols, idx.cobertura_mes)),
-      cobertura_dias_30: parseNumber(getCell(cols, idx.cobertura_dias_30)),
+      cobertura_mes:    parseNumber(getCell(cols, idx.cobertura_mes)),
+      cobertura_dias_30:parseNumber(getCell(cols, idx.cobertura_dias_30)),
     };
 
     acc.push(record);
@@ -205,30 +214,30 @@ function aplicarFiltrosYRender(resetSort = false) {
 
   let data = [...rawData];
 
-  // Búsqueda
+  // Búsqueda texto
   if (state.search) {
     const term = state.search;
     data = data.filter((row) => {
       return (
-        String(row.codigo).toLowerCase().includes(term) ||
-        String(row.clave).toLowerCase().includes(term) ||
+        String(row.codigo).toLowerCase().includes(term)   ||
+        String(row.clave).toLowerCase().includes(term)    ||
         String(row.desc_prod).toLowerCase().includes(term)
       );
     });
   }
 
-  // Clasificación
+  // Filtro por clasificación (chips)
   if (state.clasifActivas.size > 0) {
     data = data.filter((row) => state.clasifActivas.has(row.clasificacion));
   }
 
-  // Cobertura Mes
+  // Filtro por cobertura (Mes)
   if (state.filtroCobertura !== "all") {
     data = data.filter((row) => {
       const c = row.cobertura_mes;
       if (state.filtroCobertura === "critico") return c >= 0 && c <= 1;
-      if (state.filtroCobertura === "medio") return c > 1 && c <= 3;
-      if (state.filtroCobertura === "alto") return c > 3;
+      if (state.filtroCobertura === "medio")   return c > 1 && c <= 3;
+      if (state.filtroCobertura === "alto")    return c > 3;
       return true;
     });
   }
@@ -250,23 +259,26 @@ function aplicarFiltrosYRender(resetSort = false) {
 }
 
 // =========================
-/* ORDENAR */
+// ORDENAR TABLA
 // =========================
 
 function sortByColumn(key, isNumeric) {
   if (!key) return;
+
   if (sortConfig.key === key) {
     sortConfig.direction = sortConfig.direction === "asc" ? "desc" : "asc";
   } else {
     sortConfig.key = key;
     sortConfig.direction = "asc";
   }
+
   const data = sortData([...filteredData], key, isNumeric);
   renderTable(data);
 }
 
 function sortData(data, key, isNumericOverride = false) {
   const dir = sortConfig.direction === "asc" ? 1 : -1;
+
   return data.sort((a, b) => {
     const va = a[key];
     const vb = b[key];
@@ -286,56 +298,61 @@ function sortData(data, key, isNumericOverride = false) {
 // =========================
 
 function renderKPIs(data) {
-  const total = rawData.length;
+  const total     = rawData.length;
   const filtrados = data.length;
 
-  const kpiProductos = document.getElementById("kpiProductos");
-  const kpiInventario = document.getElementById("kpiInventario");
+  const kpiProductos     = document.getElementById("kpiProductos");
+  const kpiInventario    = document.getElementById("kpiInventario");
   const kpiPromedioVenta = document.getElementById("kpiPromedioVenta");
-  const kpiCobertura = document.getElementById("kpiCobertura");
+  const kpiCobertura     = document.getElementById("kpiCobertura");
 
   if (!data.length) {
-    if (kpiProductos) kpiProductos.textContent = "0 / " + total;
-    if (kpiInventario) kpiInventario.textContent = "0";
+    if (kpiProductos)     kpiProductos.textContent     = "0 / " + total;
+    if (kpiInventario)    kpiInventario.textContent    = "0";
     if (kpiPromedioVenta) kpiPromedioVenta.textContent = "0";
-    if (kpiCobertura) kpiCobertura.textContent = "0";
+    if (kpiCobertura)     kpiCobertura.textContent     = "0";
     return;
   }
 
-  const invTotal = data.reduce((acc, r) => acc + (r.inv || 0), 0);
-  const promVenta = data.reduce(
-    (acc, r) => acc + (r.promedio_vta_mes || 0),
-    0
-  );
-  const promCobertura =
-    data.reduce((acc, r) => acc + (r.cobertura_dias_30 || 0), 0) /
-    data.length;
+  const invTotal   = data.reduce((acc, r) => acc + (r.inv || 0), 0);
+  const promVenta  = data.reduce((acc, r) => acc + (r.promedio_vta_mes || 0), 0);
+  const promCobert =
+    data.reduce((acc, r) => acc + (r.cobertura_dias_30 || 0), 0) / data.length;
 
-  if (kpiProductos)
-    kpiProductos.textContent = `${filtrados.toLocaleString()} / ${total.toLocaleString()}`;
-  if (kpiInventario)
+  if (kpiProductos) {
+    kpiProductos.textContent =
+      `${filtrados.toLocaleString()} / ${total.toLocaleString()}`;
+  }
+
+  if (kpiInventario) {
     kpiInventario.textContent = invTotal.toLocaleString(undefined, {
       maximumFractionDigits: 0,
     });
-  if (kpiPromedioVenta)
+  }
+
+  if (kpiPromedioVenta) {
     kpiPromedioVenta.textContent = promVenta.toLocaleString(undefined, {
       maximumFractionDigits: 0,
     });
-  if (kpiCobertura)
-    kpiCobertura.textContent = promCobertura.toLocaleString(undefined, {
+  }
+
+  if (kpiCobertura) {
+    kpiCobertura.textContent = promCobert.toLocaleString(undefined, {
+      minimumFractionDigits: 1,
       maximumFractionDigits: 1,
     });
+  }
 }
 
 // =========================
-// RESUMEN CLASIFICACIÓN
+// RESUMEN POR CLASIFICACIÓN
 // =========================
 
 function renderResumenClasif(data) {
   const container = document.getElementById("clasifSummary");
   if (!container) return;
-  container.innerHTML = "";
 
+  container.innerHTML = "";
   if (!data.length) return;
 
   const map = {};
@@ -343,7 +360,7 @@ function renderResumenClasif(data) {
     const c = r.clasificacion || "Sin";
     if (!map[c]) map[c] = { count: 0, inv: 0 };
     map[c].count += 1;
-    map[c].inv += r.inv || 0;
+    map[c].inv   += r.inv || 0;
   });
 
   Object.entries(map).forEach(([clasif, info]) => {
@@ -360,7 +377,8 @@ function renderResumenClasif(data) {
 
     const detail = document.createElement("span");
     detail.style.color = "var(--text-muted)";
-    detail.textContent = `· ${info.count.toLocaleString()} prod · Inv ${info.inv.toLocaleString()}`;
+    detail.textContent =
+      `· ${info.count.toLocaleString()} prod · Inv ${info.inv.toLocaleString()}`;
     pill.appendChild(detail);
 
     container.appendChild(pill);
@@ -374,59 +392,70 @@ function renderResumenClasif(data) {
 function renderTable(data) {
   const tbody = document.querySelector("#dataTable tbody");
   if (!tbody) return;
+
   tbody.innerHTML = "";
 
   const rowsInfo = document.getElementById("rowsInfo");
-  if (rowsInfo) rowsInfo.textContent = `${data.length.toLocaleString()} registros`;
+  if (rowsInfo) {
+    rowsInfo.textContent = `${data.length.toLocaleString()} registros`;
+  }
 
   if (!data.length) return;
 
   data.forEach((row) => {
     const tr = document.createElement("tr");
 
+    // Código
     const tdCodigo = document.createElement("td");
     tdCodigo.textContent = row.codigo;
     tr.appendChild(tdCodigo);
 
+    // Clave
     const tdClave = document.createElement("td");
     tdClave.textContent = row.clave;
     tr.appendChild(tdClave);
 
+    // Descripción
     const tdDesc = document.createElement("td");
     tdDesc.textContent = row.desc_prod;
     tr.appendChild(tdDesc);
 
+    // Inv
     const tdInv = document.createElement("td");
     tdInv.classList.add("is-numeric");
     tdInv.textContent = formatNumber(row.inv);
     tr.appendChild(tdInv);
 
+    // Clasificación
     const tdClasif = document.createElement("td");
-    const badge = document.createElement("span");
-    const c = row.clasificacion || "–";
+    const badge    = document.createElement("span");
+    const c        = row.clasificacion || "–";
     badge.className = `badge-clasif ${c}`;
     badge.textContent = c;
     tdClasif.appendChild(badge);
     tr.appendChild(tdClasif);
 
+    // Promedio Vta Mes
     const tdProm = document.createElement("td");
     tdProm.classList.add("is-numeric");
     tdProm.textContent = formatNumber(row.promedio_vta_mes);
     tr.appendChild(tdProm);
 
+    // Cobertura (Mes)
     const tdCobMes = document.createElement("td");
     tdCobMes.classList.add("is-numeric");
     tdCobMes.textContent = formatNumber(row.cobertura_mes, 1);
     tr.appendChild(tdCobMes);
 
+    // Cobertura Días (30) con heat map
     const tdCobDias = document.createElement("td");
     tdCobDias.classList.add("is-numeric");
     tdCobDias.textContent = formatNumber(row.cobertura_dias_30);
 
     const d = row.cobertura_dias_30;
-    if (d <= 30) tdCobDias.classList.add("heat-low");
-    else if (d > 30 && d <= 90) tdCobDias.classList.add("heat-mid");
-    else if (d > 90) tdCobDias.classList.add("heat-high");
+    if (d <= 30)        tdCobDias.classList.add("heat-low");
+    else if (d <= 90)   tdCobDias.classList.add("heat-mid");
+    else if (d > 90)    tdCobDias.classList.add("heat-high");
 
     tr.appendChild(tdCobDias);
 
@@ -443,12 +472,13 @@ function formatNumber(n, decimals = 0) {
 }
 
 // =========================
-// CHIPS CLASIFICACIÓN
+// CHIPS DE CLASIFICACIÓN
 // =========================
 
 function construirChipsClasificacion(data) {
   const container = document.getElementById("clasifChips");
   if (!container) return;
+
   container.innerHTML = "";
 
   const clasifs = Array.from(
@@ -500,8 +530,7 @@ function actualizarContadoresChips() {
   const chips = document.querySelectorAll("#clasifChips .chip");
   chips.forEach((chip) => {
     const value = chip.dataset.value;
-    const span = chip.querySelector("span");
+    const span  = chip.querySelector("span");
     span.textContent = (conteos[value] || 0).toLocaleString();
   });
 }
-
